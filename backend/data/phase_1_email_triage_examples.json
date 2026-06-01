@@ -1,0 +1,82 @@
+{
+  "name": "phase_1_email_triage_examples",
+  "description": "Small labeled dataset for testing the Phase 1 AI inbox triage classifier.",
+  "schema_version": "1.0",
+  "label_schema": {
+    "category": ["human", "event", "spam", "machine_generated"],
+    "priority": ["urgent_action", "non_urgent_action", "ignore"],
+    "suggested_action": ["acknowledge", "escalate", "archive", "ignore", "ask_human"]
+  },
+  "examples": [
+    {
+      "id": "phase1_001",
+      "title": "Human urgent trading investigation",
+      "input": {
+        "subject": "VOD.L stock stopped trading",
+        "body": "Hi team,\n\nWhy did this POV order stop trading before market close?\nIt was supposed to trade on MOC - PUKOID3234234234\n\nRegards,\nTrader"
+      },
+      "expected_output": {
+        "category": "human",
+        "priority": "urgent_action",
+        "reason": "The sender reports that an order stopped trading before market close, which could indicate trading or client impact.",
+        "suggested_action": "acknowledge"
+      }
+    },
+    {
+      "id": "phase1_002",
+      "title": "Human non-urgent developer request",
+      "input": {
+        "subject": "<instance> stats check request",
+        "body": "Hi team,\n\nCan you run this admin command on <instance>?\n\nadmincmd <cmd>\n\nadmincmd <cmd2>\n\nplease paste me the output thx\n\nRegards,\nDev"
+      },
+      "expected_output": {
+        "category": "human",
+        "priority": "non_urgent_action",
+        "reason": "A developer is asking support to run admin commands and return the output, but there is no incident or trading impact mentioned.",
+        "suggested_action": "ask_human"
+      }
+    },
+    {
+      "id": "phase1_003",
+      "title": "Event charity invitation",
+      "input": {
+        "subject": "You are invited for competitive darts for good cause",
+        "body": "Hi,\n\nWe are hosting a social event where we invite you to compete in playing darts!\n\nThis event money will all go to charity\n\nWe are organising this event at <dart place location and name>\nWill take place on June 11th\n\nClick this link if you would like to join <link>\n\nThanks,\nEvent organising team"
+      },
+      "expected_output": {
+        "category": "event",
+        "priority": "non_urgent_action",
+        "reason": "The email is an invitation to a charity social event and does not require production support investigation.",
+        "suggested_action": "archive"
+      }
+    },
+    {
+      "id": "phase1_004",
+      "title": "Machine-generated urgent health check",
+      "input": {
+        "subject": "<System Name> - SOD Health Checks",
+        "body": "Check timestamp: 07:05:00 - 30/04/2026\n--------------------------------------------\n| Instance    | Status | Response Time     |\n| <instance1> | OK     | 2s - 07:05:02     |\n| <instance2> | OK     | 2s - 07:05:02     |\n| <instance3> | FAIL   | Timeout after 30s |\n--------------------------------------------"
+      },
+      "expected_output": {
+        "category": "machine_generated",
+        "priority": "urgent_action",
+        "reason": "One instance failed the start-of-day health check with a timeout, which may indicate a production readiness issue.",
+        "suggested_action": "escalate"
+      }
+    },
+    {
+      "id": "phase1_005",
+      "title": "Machine-generated green health check",
+      "input": {
+        "subject": "<System Name 2> - SOD Health Checks",
+        "body": "Check timestamp: 07:05:00 - 29/04/2026\n--------------------------------------------\n| Instance    | Status | Response Time     |\n| <instance1> | OK     | 2s - 07:05:02     |\n| <instance2> | OK     | 3s - 07:05:03     |\n| <instance3> | OK     | 2s - 07:05:02     |\n--------------------------------------------"
+      },
+      "expected_output": {
+        "category": "machine_generated",
+        "priority": "ignore",
+        "reason": "All listed instances passed the health check, so no support action is required.",
+        "suggested_action": "ignore"
+      }
+    }
+  ]
+}

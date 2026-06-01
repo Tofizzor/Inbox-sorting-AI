@@ -1,0 +1,23 @@
+My thoughts of this project
+
+
+Backend:
+    - Has a listener that picks up received emails that are directed to a specific email address
+        Raw emails are stored in database for tracking and audit purposes, they have an id that is linked to a processed email
+    - The email is parsed into readable data
+    - Backend consists of json configurable guide that gives instructions to AI agent on how to review the email and respond
+        Guide gives clear instructions on what to do and what details are potentially important (Order ID, Error message) 
+    - Parsed email and a guide is provided to an AI agent
+        Only accept AI response in processable data, if AI does not provide data in desired state, log the bad response and query the agent again
+    - AI agent responds in a format that is then processed and stored in the database
+
+Frontend:
+- Reads database and provides details to user
+- Categorised emails are displayed in a list with details
+   User can click on an email to manage it
+   User can view the original email
+   User can accept the AI response and send it to the customer
+   User can edit the AI response and send it to the customer
+   User can view the audit trail
+- User can view/edit the guide and save it
+
