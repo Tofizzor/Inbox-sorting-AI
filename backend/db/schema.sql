@@ -58,3 +58,37 @@ CREATE TABLE IF NOT EXISTS audit_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_events(entity_type, entity_id);
+
+-- Phase 2: AI-drafted replies with a human approval gate.
+-- Lifecycle: draft -> edited -> approved -> sent. Regenerating creates a new row.
+-- Nothing is ever sent unless status = 'approved' (enforced in services + a 409 guard).
+CREATE TABLE IF NOT EXISTS draft_replies (
+    id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL REFERENCES messages(id),
+    analysis_id TEXT REFERENCES analyses(id),
+    generated_text TEXT NOT NULL,
+    edited_text TEXT,
+    status TEXT NOT NULL DEFAULT 'draft',
+    tone TEXT NOT NULL DEFAULT 'professional',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    approved_by TEXT,
+    sent_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_draft_replies_message_id ON draft_replies(message_id);
+CREATE INDEX IF NOT EXISTS idx_draft_replies_status ON draft_replies(status);
+
+-- Failed reply-generation attempts (mirrors analysis_attempts): garbage AI output is
+-- logged here for audit instead of being persisted as a usable draft.
+CREATE TABLE IF NOT EXISTS reply_attempts (
+    id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL REFERENCES messages(id),
+    attempt_number INTEGER NOT NULL,
+    raw_llm_response TEXT,
+    error_type TEXT NOT NULL,
+    error_detail TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_reply_attempts_message_id ON reply_attempts(message_id);

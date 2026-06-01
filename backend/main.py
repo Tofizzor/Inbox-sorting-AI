@@ -13,6 +13,7 @@ from db.database import init_db
 from routers.classify import router as classify_router
 from routers.guide import router as guide_router
 from routers.messages import router as messages_router
+from routers.replies import router as replies_router
 
 
 @asynccontextmanager
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(classify_router)
     app.include_router(messages_router)
+    app.include_router(replies_router)
     app.include_router(guide_router)
     return app
 

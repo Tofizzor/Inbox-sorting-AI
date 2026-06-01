@@ -303,6 +303,15 @@ def get_message_audit(message_id: str) -> list[dict]:
             """,
             (message_id,),
         ).fetchall()
+        reply_attempts = conn.execute(
+            """
+            SELECT id, attempt_number, error_type, error_detail, created_at
+            FROM reply_attempts
+            WHERE message_id = ?
+            ORDER BY attempt_number ASC
+            """,
+            (message_id,),
+        ).fetchall()
     events = [
         {
             "id": r["id"],
@@ -331,6 +340,22 @@ def get_message_audit(message_id: str) -> list[dict]:
                 "created_at": a["created_at"],
             }
         )
+    for a in reply_attempts:
+        events.append(
+            {
+                "id": a["id"],
+                "entity_type": "message",
+                "entity_id": message_id,
+                "action": "reply_attempt_failed",
+                "actor": "system",
+                "payload": {
+                    "attempt_number": a["attempt_number"],
+                    "error_type": a["error_type"],
+                    "error_detail": a["error_detail"],
+                },
+                "created_at": a["created_at"],
+            }
+        )
     events.sort(key=lambda e: e["created_at"])
     return events
 
@@ -339,3 +364,237 @@ def message_exists(message_id: str) -> bool:
     with db_session() as conn:
         row = conn.execute("SELECT 1 FROM messages WHERE id = ?", (message_id,)).fetchone()
         return row is not None
+
+
+# --- Phase 2: draft replies ------------------------------------------------------
+
+
+def _row_to_reply_dict(row) -> dict:
+    return {
+        "id": row["id"],
+        "message_id": row["message_id"],
+        "analysis_id": row["analysis_id"],
+        "generated_text": row["generated_text"],
+        "edited_text": row["edited_text"],
+        "status": row["status"],
+        "tone": row["tone"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "approved_by": row["approved_by"],
+        "sent_at": row["sent_at"],
+    }
+
+
+def get_latest_analysis_for_message(message_id: str) -> Optional[dict]:
+    with db_session() as conn:
+        return get_latest_analysis(conn, message_id)
+
+
+def create_draft_reply(
+    message_id: str,
+    analysis_id: Optional[str],
+    generated_text: str,
+    *,
+    tone: str = "professional",
+    model_name: Optional[str] = None,
+    prompt_version: Optional[str] = None,
+) -> dict:
+    """Persist a freshly generated draft (status 'draft') and audit draft_created."""
+    reply_id = _new_id()
+    now = _utc_now()
+    with db_session() as conn:
+        conn.execute(
+            """
+            INSERT INTO draft_replies
+            (id, message_id, analysis_id, generated_text, edited_text, status, tone,
+             created_at, updated_at, approved_by, sent_at)
+            VALUES (?, ?, ?, ?, NULL, 'draft', ?, ?, ?, NULL, NULL)
+            """,
+            (reply_id, message_id, analysis_id, generated_text, tone, now, now),
+        )
+        record_audit(
+            conn,
+            entity_type="message",
+            entity_id=message_id,
+            action="draft_created",
+            actor="system",
+            payload={
+                "reply_id": reply_id,
+                "analysis_id": analysis_id,
+                "tone": tone,
+                "model_name": model_name,
+                "prompt_version": prompt_version,
+            },
+        )
+        row = conn.execute("SELECT * FROM draft_replies WHERE id = ?", (reply_id,)).fetchone()
+    return _row_to_reply_dict(row)
+
+
+def get_latest_reply(message_id: str) -> Optional[dict]:
+    """Latest reply for the message (most recently created row wins after regeneration)."""
+    with db_session() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM draft_replies
+            WHERE message_id = ?
+            ORDER BY created_at DESC, rowid DESC
+            LIMIT 1
+            """,
+            (message_id,),
+        ).fetchone()
+        return _row_to_reply_dict(row) if row is not None else None
+
+
+def update_reply_edit(
+    reply_id: str, message_id: str, edited_text: str, *, editor: str = "user"
+) -> dict:
+    """Save a human edit: status -> edited, clear any prior approval (forces re-approval)."""
+    now = _utc_now()
+    with db_session() as conn:
+        conn.execute(
+            """
+            UPDATE draft_replies
+            SET edited_text = ?, status = 'edited', approved_by = NULL, updated_at = ?
+            WHERE id = ?
+            """,
+            (edited_text, now, reply_id),
+        )
+        record_audit(
+            conn,
+            entity_type="message",
+            entity_id=message_id,
+            action="reply_edited",
+            actor=editor,
+            payload={"reply_id": reply_id},
+        )
+        row = conn.execute("SELECT * FROM draft_replies WHERE id = ?", (reply_id,)).fetchone()
+    return _row_to_reply_dict(row)
+
+
+def approve_reply(reply_id: str, message_id: str, *, approved_by: str = "user") -> dict:
+    """Record explicit human approval: status -> approved."""
+    now = _utc_now()
+    with db_session() as conn:
+        conn.execute(
+            """
+            UPDATE draft_replies
+            SET status = 'approved', approved_by = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (approved_by, now, reply_id),
+        )
+        record_audit(
+            conn,
+            entity_type="message",
+            entity_id=message_id,
+            action="reply_approved",
+            actor=approved_by,
+            payload={"reply_id": reply_id},
+        )
+        row = conn.execute("SELECT * FROM draft_replies WHERE id = ?", (reply_id,)).fetchone()
+    return _row_to_reply_dict(row)
+
+
+def mark_reply_sent(reply_id: str, message_id: str, *, actor: str = "user") -> dict:
+    """Mock send: status -> sent, set sent_at, audit reply_sent with the actor."""
+    now = _utc_now()
+    with db_session() as conn:
+        conn.execute(
+            """
+            UPDATE draft_replies
+            SET status = 'sent', sent_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (now, now, reply_id),
+        )
+        record_audit(
+            conn,
+            entity_type="message",
+            entity_id=message_id,
+            action="reply_sent",
+            actor=actor,
+            payload={"reply_id": reply_id, "sent_at": now},
+        )
+        row = conn.execute("SELECT * FROM draft_replies WHERE id = ?", (reply_id,)).fetchone()
+    return _row_to_reply_dict(row)
+
+
+def log_reply_attempt(
+    message_id: str,
+    attempt_number: int,
+    raw_llm_response: Optional[str],
+    error_type: str,
+    error_detail: str,
+) -> str:
+    attempt_id = _new_id()
+    with db_session() as conn:
+        conn.execute(
+            """
+            INSERT INTO reply_attempts
+            (id, message_id, attempt_number, raw_llm_response, error_type, error_detail, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                attempt_id,
+                message_id,
+                attempt_number,
+                raw_llm_response,
+                error_type,
+                error_detail,
+                _utc_now(),
+            ),
+        )
+    return attempt_id
+
+
+def mark_analysis_needs_review(message_id: str, detail: str) -> None:
+    """Flag the latest analysis for human review after reply generation fails.
+
+    Only flips needs_review (never overwrites category/priority/etc.) and audits the
+    failure so a human knows the AI could not help with the reply.
+    """
+    with db_session() as conn:
+        conn.execute(
+            """
+            UPDATE analyses
+            SET needs_review = 1
+            WHERE id = (
+                SELECT id FROM analyses
+                WHERE message_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+            )
+            """,
+            (message_id,),
+        )
+        record_audit(
+            conn,
+            entity_type="message",
+            entity_id=message_id,
+            action="reply_generation_failed",
+            actor="system",
+            payload={"detail": detail},
+        )
+
+
+def get_reply_attempts(message_id: str) -> list[dict]:
+    with db_session() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, attempt_number, error_type, error_detail, created_at
+            FROM reply_attempts
+            WHERE message_id = ?
+            ORDER BY attempt_number ASC
+            """,
+            (message_id,),
+        ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "attempt_number": r["attempt_number"],
+            "error_type": r["error_type"],
+            "error_detail": r["error_detail"],
+            "created_at": r["created_at"],
+        }
+        for r in rows
+    ]
