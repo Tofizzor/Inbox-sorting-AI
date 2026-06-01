@@ -1,0 +1,3 @@
+# Requirements for the project
+pydantic
+python-dotenv

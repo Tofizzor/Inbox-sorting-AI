@@ -162,8 +162,15 @@ def _call_anthropic(system_prompt: str, user_prompt: str) -> str:
     return content
 
 
+# Keep in sync with services.guide._REPLY_INTENT_MARKER. The mock detects a reply
+# request from the system prompt and returns reply text instead of triage JSON.
+_MOCK_REPLY_INTENT_MARKER = "drafting a reply"
+
+
 def _call_mock(system_prompt: str, user_prompt: str) -> str:
-    del system_prompt
+    if _MOCK_REPLY_INTENT_MARKER in system_prompt.lower():
+        return _mock_reply()
+
     text = user_prompt.lower()
 
     if any(k in text for k in ("unsubscribe", "lottery", "viagra", "noreply marketing")):
@@ -235,3 +242,14 @@ def _call_mock(system_prompt: str, user_prompt: str) -> str:
         },
     }
     return json.dumps(payload)
+
+
+def _mock_reply() -> str:
+    """Deterministic, valid reply draft for offline tests and demos."""
+    reply = (
+        "Hello,\n\n"
+        "Thank you for reaching out. We've received your message and our support team "
+        "is reviewing the details now. We'll follow up with an update as soon as possible.\n\n"
+        "Best regards,\nSupport Team"
+    )
+    return json.dumps({"reply": reply})

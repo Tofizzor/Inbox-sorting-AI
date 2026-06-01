@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0",
+  "label_schema": {
+    "category": ["human", "event", "spam", "machine_generated"],
+    "priority": ["urgent_action", "non_urgent_action", "ignore"],
+    "suggested_action": ["acknowledge", "escalate", "archive", "ignore", "ask_human"]
+  },
+  "policy": {
+    "summary": "Triage inbound support emails. Classify each message and extract useful identifiers.",
+    "category_rules": {
+      "human": "Written by a person expecting support action or a reply.",
+      "machine_generated": "Automated alerts, health checks, monitoring reports.",
+      "event": "Invitations, social events, calendar-style announcements.",
+      "spam": "Unsolicited promotional mail with no legitimate support need."
+    },
+    "priority_rules": {
+      "urgent_action": "Trading/production/client impact, failures, or explicit urgency. Anything that is related to order investigation, failed trades. Issues with application, stuck trading .",
+      "non_urgent_action": "Real request but no time pressure. This could be non urgent emails, developer requests to run adming commands or provide data. Pull request approvals",
+      "ignore": "No action required (e.g. all-green health check)."
+    },
+    "extraction_hints": [
+      "order_ids: POV/MOC order references, PUKOID-style IDs",
+      "instance_names: server/instance placeholders in subject or body",
+      "error_summary: one line if FAIL, Timeout, or trading impact",
+      "detected_keywords: FAIL, Timeout, MOC, urgent terms"
+    ]
+  },
+  "guide_text": "Read subject and body together. Return only JSON matching the schema. Do not invent facts not present in the email. Ground the reason in the email content."
+}
