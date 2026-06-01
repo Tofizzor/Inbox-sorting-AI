@@ -84,8 +84,66 @@ GET  /messages/{id}     → raw + latest analysis
 GET  /guide / PUT /guide → editable triage policy (JSON in DB)
 ```
 
-**Phase 2 (planned):** draft reply, approve/edit, mock send  
 **Phase 3 (planned):** email listener / IMAP → same ingest pipeline
+
+## Replies (Phase 2) — AI draft, human approval, mock send
+
+The AI **drafts** a customer-facing reply; a human **edits/approves**, and only an
+**approved** reply can be (mock) **sent**. This is a second, independent LLM call from
+triage, so each is testable in isolation. Reply generation returns JSON `{"reply": "..."}`,
+which is validated (non-empty, length-bounded) before anything is persisted.
+
+### State machine
+
+```
+              POST /draft-reply (requires analysis)
+                 │
+                 ▼
+   (none) ─▶ [draft] ──PATCH──▶ [edited] ──approve──▶ [approved] ──send(mock)──▶ [sent]
+                 │  approve (as-is) ▲    │ edit re-opens (clears approved_by)        ▲
+                 └──────────────────┘    └────────────────────────────────────────────
+        send is rejected with 409 from any status other than `approved`
+        regenerating (POST /draft-reply again) creates a NEW draft row → must be re-approved
+```
+
+Safety invariant: **nothing is sent without explicit human approval.** Sending a reply
+that is not `approved` returns **409 Conflict**; editing an approved reply clears the
+approval so it must be re-approved before it can be sent.
+
+### Endpoints
+
+| Method | Path | Purpose | Notable status codes |
+|--------|------|---------|----------------------|
+| `POST`  | `/messages/{id}/draft-reply` | Generate + store a draft (body: optional `{"tone": "professional"}`) | `201`; `409` if not analyzed; `422` generation failed; `503` provider down |
+| `GET`   | `/messages/{id}/reply` | Latest reply for the message | `200`; `404` if none |
+| `PATCH` | `/messages/{id}/reply` | Save a human edit (body: `{"edited_text": "...", "editor": "user"}`) → `edited` | `200`; `404`; `409` if already sent |
+| `POST`  | `/messages/{id}/reply/approve` | Approve (body: optional `{"approved_by": "user"}`) → `approved` | `200`; `404`; `409` if already sent |
+| `POST`  | `/messages/{id}/reply/send` | **Mock** send (body: optional `{"actor": "user"}`) → `sent` | `200`; **`409` unless `approved`**; `404` |
+
+On failed generation the latest analysis is flagged `needs_review`, each attempt is logged
+to `reply_attempts`, and no draft is persisted. Every transition writes an audit event
+(`draft_created`, `reply_edited`, `reply_approved`, `reply_sent`) visible via
+`GET /messages/{id}/audit`. **No real SMTP is integrated; "send" is a mock that only marks state + audits.**
+
+### Example flow
+
+```bash
+# 1. Draft a reply (message must already be analyzed)
+curl -X POST http://127.0.0.1:8000/messages/{id}/draft-reply
+
+# 2. (optional) Edit it
+curl -X PATCH http://127.0.0.1:8000/messages/{id}/reply ^
+  -H "Content-Type: application/json" -d "{\"edited_text\":\"Thanks, we're on it.\"}"
+
+# 3. Sending before approval is blocked (409)
+curl -X POST http://127.0.0.1:8000/messages/{id}/reply/send   # -> 409 Conflict
+
+# 4. Approve, then send (mock)
+curl -X POST http://127.0.0.1:8000/messages/{id}/reply/approve -d "{\"approved_by\":\"alice\"}"
+curl -X POST http://127.0.0.1:8000/messages/{id}/reply/send    -d "{\"actor\":\"alice\"}"
+```
+
+Run the whole flow offline with `LLM_PROVIDER=mock` (no GPU, no keys, no network).
 
 ## Tests
 
