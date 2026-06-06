@@ -31,3 +31,31 @@ Every agent working on this repository must follow these standards. Phase prompt
 - Conventional commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`). One phase = one branch = one PR.
 - Update the relevant README when behaviour or setup changes.
 - Run formatters/linters and the test suite before declaring done.
+
+## Cursor Cloud specific instructions
+
+This repo is **backend-only** today (no `frontend/` yet). SQLite is embedded — no separate database process.
+
+### Services
+
+| Service | Command | Port |
+|---------|---------|------|
+| FastAPI API | `cd backend && source .venv/bin/activate && uvicorn main:app --reload` | 8000 |
+
+Use `LLM_PROVIDER=mock` in `backend/.env` for offline dev and demos (no Ollama, API keys, or network). Tests always mock the LLM via `conftest.py`.
+
+### Common commands (from `backend/`)
+
+```bash
+source .venv/bin/activate
+PYTHONPATH=. pytest          # 32 tests; requires PYTHONPATH=. (no pytest.ini yet)
+uvicorn main:app --reload    # http://127.0.0.1:8000/docs
+python scripts/mock_ingest.py  # ingest examples (API must be running)
+```
+
+### Gotchas
+
+- **python3-venv**: Ubuntu images may need `sudo apt-get install -y python3.12-venv` before `python3 -m venv .venv` (handled by the VM update script).
+- **PYTHONPATH**: Run pytest as `PYTHONPATH=. pytest` from `backend/` until a `pytest.ini` or `pyproject.toml` is added.
+- **Lint**: No ruff/black/eslint configured yet; `AGENTS.md` lint expectation applies once Phase 8 CI lands.
+- **Ollama**: Only needed when `LLM_PROVIDER=ollama` (default in `.env.example`); cloud agents should use `mock`.
